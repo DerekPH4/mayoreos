@@ -111,29 +111,43 @@ def extraer_tabla_pdf(ruta_pdf):
     with pdfplumber.open(ruta_pdf) as pdf:
         for i, page in enumerate(pdf.pages):
             tabla = page.extract_table()
-            if tabla:
-                filas = tabla[1:] if i == 0 else tabla
-                for fila in filas:
-                    if not fila:
-                        continue
-                    modelo = fila[2].strip() if len(fila) > 2 and fila[2] else ""
-                    color = fila[3].strip() if len(fila) > 3 and fila[3] else ""
-                    talla = fila[4].strip() if len(fila) > 4 and fila[4] else ""
+            if not tabla:
+                continue
+            filas = tabla[1:] if i == 0 else tabla
+            for fila in filas:
+                if not fila or len(fila) < 5:
+                    continue
 
-                    # Buscar precio desde el final hacia atrás (primera celda con $)
-                    precio = ""
-                    for celda in reversed(fila):
-                        if celda and "$" in celda:
-                            precio = celda.strip()
-                            break
+                # Intenta encontrar modelo, color y precio dinámicamente
+                modelo = ""
+                color = ""
+                precio = ""
 
-                    if modelo and color:
-                        resultados.append({
-                            "modelo": modelo,
-                            "color": color,
-                            "talla": talla,
-                            "precio": precio
-                        })
+                # Modelo puede estar en una celda tipo 'Ph 5A' o 'Rodeo Nights'
+                for celda in fila:
+                    if celda and any(x in celda.upper() for x in ['PH', 'RODEO']):
+                        modelo = celda.strip()
+                        break
+
+                # Color podría estar en una celda tipo 'Black', 'Cocoa', 'Sand', etc.
+                for celda in fila:
+                    if celda and any(x in celda.upper() for x in ['BLACK', 'COCOA', 'TURQUOISE', 'SAND', 'RED', 'BLUE', 'CHARCOAL', 'CHOCOLATE', 'GRAPE', 'PINK', 'GREEN', 'YELLOW', 'SILVER']):
+                        color = celda.strip()
+                        break
+
+                # Precio: primer celda con símbolo de $ desde el final
+                for celda in reversed(fila):
+                    if celda and "$" in celda:
+                        precio = celda.strip()
+                        break
+
+                if modelo and color:
+                    resultados.append({
+                        "modelo": modelo,
+                        "color": color,
+                        "talla": "",  # opcional: podrías extraerlo con más lógica
+                        "precio": precio
+                    })
     return resultados
 
 
