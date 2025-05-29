@@ -113,29 +113,18 @@ def extraer_tabla_pdf(ruta_pdf):
             tabla = page.extract_table()
             if not tabla:
                 continue
+
             filas = tabla[1:] if i == 0 else tabla
             for fila in filas:
                 if not fila or len(fila) < 5:
                     continue
 
-                # Intenta encontrar modelo, color y precio dinámicamente
-                modelo = ""
-                color = ""
+                modelo = fila[2].strip().upper() if len(fila) > 2 and fila[2] else ""
+                color = fila[3].strip().upper() if len(fila) > 3 and fila[3] else ""
+                talla = fila[4].strip() if len(fila) > 4 and fila[4] else ""
+
+                # Precio: buscar primera celda con $
                 precio = ""
-
-                # Modelo puede estar en una celda tipo 'Ph 5A' o 'Rodeo Nights'
-                for celda in fila:
-                    if celda and any(x in celda.upper() for x in ['PH', 'RODEO']):
-                        modelo = celda.strip()
-                        break
-
-                # Color podría estar en una celda tipo 'Black', 'Cocoa', 'Sand', etc.
-                for celda in fila:
-                    if celda and any(x in celda.upper() for x in ['BLACK', 'COCOA', 'TURQUOISE', 'SAND', 'RED', 'BLUE', 'CHARCOAL', 'CHOCOLATE', 'GRAPE', 'PINK', 'GREEN', 'YELLOW', 'SILVER']):
-                        color = celda.strip()
-                        break
-
-                # Precio: primer celda con símbolo de $ desde el final
                 for celda in reversed(fila):
                     if celda and "$" in celda:
                         precio = celda.strip()
@@ -143,9 +132,9 @@ def extraer_tabla_pdf(ruta_pdf):
 
                 if modelo and color:
                     resultados.append({
-                        "modelo": modelo,
-                        "color": color,
-                        "talla": "",  # opcional: podrías extraerlo con más lógica
+                        "modelo": modelo,  # ej. STRAW, RODEONIGHTS
+                        "color": color,    # ej. PH5A, TEXASBLUE
+                        "talla": talla,
                         "precio": precio
                     })
     return resultados
