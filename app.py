@@ -1,147 +1,126 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, render_template
 import os
-import json
+import sqlite3
 import pdfplumber
 from werkzeug.utils import secure_filename
 
-app = Flask(__name__, static_folder='static', template_folder='templates')
+app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
-app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
-
-DATA_DIR = 'data'
-TABLAS_DIR = os.path.join(DATA_DIR, 'tablas')
-CLIENTES_FILE = os.path.join(DATA_DIR, 'clientes.json')
-ARCHIVOS_FILE = os.path.join(DATA_DIR, 'archivos.json')
-
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-os.makedirs(TABLAS_DIR, exist_ok=True)
-if not os.path.exists(CLIENTES_FILE):
-    with open(CLIENTES_FILE, 'w') as f:
-        json.dump([], f)
-if not os.path.exists(ARCHIVOS_FILE):
-    with open(ARCHIVOS_FILE, 'w') as f:
-        json.dump({}, f)
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() == 'pdf'
+# Inicializar base de datos
+def init_db():
+    with sqlite3.connect('database.db') as con:
+        c = con.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS clientes (
+                        id TEXT PRIMARY KEY,
+                        mayoreo TEXT
+                     )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS tablas (
+                        cliente_id TEXT,
+                        tipo TEXT,
+                        modelo TEXT,
+                        color TEXT,
+                        qty INTEGER
+                     )''')
+        con.commit()
 
-def cargar_json(ruta):
-    if not os.path.exists(ruta):
-        return [] if 'clientes' in ruta else {}
-    try:
-        with open(ruta, 'r') as f:
-            data = json.load(f)
-            return data if isinstance(data, (list, dict)) else []
-    except:
-        return [] if 'clientes' in ruta else {}
-
-def guardar_json(ruta, datos):
-    with open(ruta, 'w') as f:
-        json.dump(datos, f, indent=2)
+init_db()
 
 @app.route('/')
-def serve_index():
-    return send_from_directory('templates', 'index.html')
+def index():
+    return render_template('index.html')
 
 @app.route('/cliente.html')
-def serve_cliente():
-    return send_from_directory('templates', 'cliente.html')
+def cliente_html():
+    return render_template('cliente.html')
 
 @app.route('/clientes', methods=['GET', 'POST', 'PUT'])
-def clientes_route():
+def clientes():
+    con = sqlite3.connect('database.db')
+    c = con.cursor()
+
     if request.method == 'GET':
-        return jsonify(cargar_json(CLIENTES_FILE))
-    elif request.method == 'POST':
-        data = request.json
-        clientes = cargar_json(CLIENTES_FILE)
-        if any(c['id'] == data['id'] for c in clientes):
-            return jsonify({'error': 'Cliente ya existe'}), 400
-        clientes.append(data)
-        guardar_json(CLIENTES_FILE, clientes)
-        return jsonify({'status': 'ok'})
-    elif request.method == 'PUT':
-        data = request.json
-        if isinstance(data, list):
-            guardar_json(CLIENTES_FILE, data)
-            return jsonify({'status': 'ok'})
-        return jsonify({'error': 'Formato inválido'}), 400
+        clientes = c.execute('SELECT * FROM clientes').fetchall()
+        return jsonify([{"id": row[0], "mayoreo": row[1]} for row in clientes])
+
+    data = request.get_json()
+
+    if request.method == 'POST':
+        try:
+            c.execute('INSERT INTO clientes (id, mayoreo) VALUES (?, ?)', (data['id'], data['mayoreo']))
+            con.commit()
+            return jsonify({"status": "ok"})
+        except sqlite3.IntegrityError:
+            return jsonify({"error": "Cliente ya existe"}), 400
+
+    if request.method == 'PUT':
+        c.execute('DELETE FROM clientes')
+        for cli in data:
+            c.execute('INSERT INTO clientes (id, mayoreo) VALUES (?, ?)', (cli['id'], cli['mayoreo']))
+        con.commit()
+        return jsonify({"status": "ok"})
 
 @app.route('/guardar_tabla/<cliente_id>', methods=['POST'])
 def guardar_tabla(cliente_id):
-    data = request.json
-    ruta = os.path.join(TABLAS_DIR, f'{cliente_id}.json')
-    guardar_json(ruta, data)
-    return jsonify({'status': 'ok'})
+    data = request.get_json()
+    con = sqlite3.connect('database.db')
+    c = con.cursor()
 
-@app.route('/leer_tabla/<cliente_id>', methods=['GET'])
+    c.execute('DELETE FROM tablas WHERE cliente_id = ?', (cliente_id,))
+    for tipo in ['activos', 'seleccionados']:
+        for item in data.get(tipo, []):
+            c.execute('INSERT INTO tablas (cliente_id, tipo, modelo, color, qty) VALUES (?, ?, ?, ?, ?)',
+                      (cliente_id, tipo, item['modelo'], item['color'], item['qty']))
+    con.commit()
+    return jsonify({"status": "ok"})
+
+@app.route('/leer_tabla/<cliente_id>')
 def leer_tabla(cliente_id):
-    ruta = os.path.join(TABLAS_DIR, f'{cliente_id}.json')
-    if not os.path.exists(ruta):
-        return jsonify({})
-    return jsonify(cargar_json(ruta))
+    con = sqlite3.connect('database.db')
+    c = con.cursor()
+    datos = {"activos": [], "seleccionados": []}
+    for tipo in ['activos', 'seleccionados']:
+        rows = c.execute('SELECT modelo, color, qty FROM tablas WHERE cliente_id = ? AND tipo = ?', (cliente_id, tipo)).fetchall()
+        datos[tipo] = [{"modelo": r[0], "color": r[1], "qty": r[2]} for r in rows]
+    return jsonify(datos)
 
 @app.route('/subir_pdf/<cliente_id>', methods=['POST'])
 def subir_pdf(cliente_id):
-    if 'archivo' not in request.files:
-        return jsonify({'error': 'No se envió ningún archivo'}), 400
-    archivo = request.files['archivo']
-    if archivo.filename == '':
-        return jsonify({'error': 'Nombre de archivo vacío'}), 400
-    if archivo and allowed_file(archivo.filename):
-        filename = secure_filename(f"{cliente_id}.pdf")
-        ruta = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        archivo.save(ruta)
-        archivos = cargar_json(ARCHIVOS_FILE)
-        archivos[cliente_id] = archivo.filename
-        guardar_json(ARCHIVOS_FILE, archivos)
-        datos = extraer_tabla_pdf(ruta)
-        return jsonify({'cliente_id': cliente_id, 'datos': datos})
-    return jsonify({'error': 'Archivo no permitido'}), 400
+    archivo = request.files.get('archivo')
+    if not archivo or not archivo.filename.endswith('.pdf'):
+        return jsonify({'error': 'Archivo no válido'}), 400
 
-@app.route('/obtener_tabla/<cliente_id>', methods=['GET'])
+    nombre = secure_filename(f"{cliente_id}.pdf")
+    ruta = os.path.join(app.config['UPLOAD_FOLDER'], nombre)
+    archivo.save(ruta)
+
+    datos = extraer_tabla_pdf(ruta)
+    return jsonify({'cliente_id': cliente_id, 'datos': datos})
+
+@app.route('/obtener_tabla/<cliente_id>')
 def obtener_tabla(cliente_id):
     ruta = os.path.join(app.config['UPLOAD_FOLDER'], f"{cliente_id}.pdf")
     if not os.path.exists(ruta):
-        return jsonify({'datos': []})
-    datos = extraer_tabla_pdf(ruta)
-    return jsonify({'cliente_id': cliente_id, 'datos': datos})
+        return jsonify({'error': 'Archivo no encontrado'}), 404
+    return jsonify({'cliente_id': cliente_id, 'datos': extraer_tabla_pdf(ruta)})
 
 def extraer_tabla_pdf(ruta_pdf):
     resultados = []
     with pdfplumber.open(ruta_pdf) as pdf:
         for i, page in enumerate(pdf.pages):
             tabla = page.extract_table()
-            if not tabla:
-                continue
-
-            filas = tabla[1:] if i == 0 else tabla
-            for fila in filas:
-                if not fila or len(fila) < 5:
-                    continue
-
-                modelo = fila[2].strip().upper() if len(fila) > 2 and fila[2] else ""
-                color = fila[3].strip().upper() if len(fila) > 3 and fila[3] else ""
-                talla = fila[4].strip() if len(fila) > 4 and fila[4] else ""
-
-                # Precio: buscar primera celda con $
-                precio = ""
-                for celda in reversed(fila):
-                    if celda and "$" in celda:
-                        precio = celda.strip()
-                        break
-
-                if modelo and color:
-                    resultados.append({
-                        "modelo": modelo,  # ej. STRAW, RODEONIGHTS
-                        "color": color,    # ej. PH5A, TEXASBLUE
-                        "talla": talla,
-                        "precio": precio
-                    })
+            if tabla:
+                filas = tabla[1:] if i == 0 else tabla
+                for fila in filas:
+                    if fila and len(fila) >= 5:
+                        resultados.append({
+                            "modelo": fila[2].strip(),
+                            "color": fila[3].strip(),
+                            "talla": fila[4].strip(),
+                            "precio": fila[-2].strip()
+                        })
     return resultados
 
-
-
-# Para Render
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(debug=True)
