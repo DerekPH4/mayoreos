@@ -102,7 +102,7 @@ def subir_pdf(cliente_id):
 def obtener_tabla(cliente_id):
     ruta = os.path.join(app.config['UPLOAD_FOLDER'], f"{cliente_id}.pdf")
     if not os.path.exists(ruta):
-        return jsonify({'datos': []})  # para evitar fallo JS
+        return jsonify({'datos': []})
     datos = extraer_tabla_pdf(ruta)
     return jsonify({'cliente_id': cliente_id, 'datos': datos})
 
@@ -124,5 +124,7 @@ def extraer_tabla_pdf(ruta_pdf):
                     })
     return resultados
 
+# Para Render
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
