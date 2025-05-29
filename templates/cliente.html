@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Tabla Cliente</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-black text-white min-h-screen p-6">
+
+  <div class="max-w-4xl mx-auto bg-zinc-900 border border-red-700 p-6 rounded-2xl shadow-xl">
+    <h1 class="text-3xl font-bold text-center text-red-500 mb-6">📄 Tabla del Cliente</h1>
+
+    <p class="text-lg mb-2"><strong>ID:</strong> <span id="cliente-id"></span></p>
+    <p class="text-lg mb-4"><strong>Nombre:</strong> <span id="cliente-nombre"></span></p>
+
+    <div id="boton-mover" class="mb-4 flex gap-4">
+      <button onclick="moverSeleccionados()" class="bg-blue-700 hover:bg-blue-800 px-4 py-2 rounded-full">Agregar a tabla de habientes</button>
+    </div>
+
+    <div class="bg-white text-black rounded-xl p-4 overflow-x-auto mb-6">
+      <table class="w-full text-sm text-left">
+        <thead>
+          <tr class="border-b border-gray-400 font-bold">
+            <th></th>
+            <th>#</th>
+            <th>Modelo</th>
+            <th>Color</th>
+            <th>QTY</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="tabla-productos"></tbody>
+      </table>
+    </div>
+
+    <div class="bg-white text-black rounded-xl p-4 overflow-x-auto">
+      <h2 class="text-lg font-bold mb-2">🧾 Tabla de Habientes</h2>
+      <table class="w-full text-sm text-left">
+        <thead>
+          <tr class="border-b border-gray-400 font-bold">
+            <th>#</th>
+            <th>Modelo</th>
+            <th>Color</th>
+            <th>QTY</th>
+          </tr>
+        </thead>
+        <tbody id="tabla-habientes"></tbody>
+      </table>
+    </div>
+
+    <button onclick="window.history.back()" class="mt-6 bg-red-700 hover:bg-red-800 px-4 py-2 rounded-full">← Volver</button>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const clienteID = params.get('id');
+    const modoSolo = params.get('modo') === 'solo';
+
+    document.getElementById('cliente-id').textContent = clienteID;
+    // Mostrar nombre del cliente
+fetch('/clientes')
+  .then(res => res.json())
+  .then(clientes => {
+    const cliente = clientes.find(c => c.id === clienteID);
+    if (cliente) {
+      document.getElementById('cliente-nombre').textContent = cliente.mayoreo;
+    } else {
+      document.getElementById('cliente-nombre').textContent = 'No encontrado';
+    }
+  });
+
+
+    if (modoSolo) {
+      document.getElementById('boton-mover').classList.add('hidden');
+    }
+
+    function guardarEstado(activos, habientes) {
+      fetch(`/guardar_tabla/${clienteID}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activos, seleccionados: habientes })
+      });
+    }
+
+    function cargarEstado(datos) {
+      const tabla = document.getElementById('tabla-productos');
+      const habientes = document.getElementById('tabla-habientes');
+      tabla.innerHTML = '';
+      habientes.innerHTML = '';
+
+      datos.activos.forEach((item, i) => {
+        const row = document.createElement('tr');
+        row.className = 'border-b border-gray-300';
+        row.innerHTML = `
+          ${!modoSolo ? `<td><input type="checkbox" class="fila-checkbox"></td>` : `<td></td>`}
+          <td>${i + 1}</td>
+          <td>${item.modelo}</td>
+          <td>${item.color}</td>
+          <td>${item.qty}</td>
+          <td>${!modoSolo ? `<button onclick="eliminarFila(this)" class="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded-full text-xs">🗑️</button>` : ''}</td>
+        `;
+        tabla.appendChild(row);
+      });
+
+      datos.seleccionados.forEach((item, i) => {
+  const row = document.createElement('tr');
+  row.className = 'border-b border-gray-300';
+
+  row.innerHTML = `
+    <td>${i + 1}</td>
+    <td>${item.modelo}</td>
+    <td>${item.color}</td>
+    <td class="flex items-center gap-2">
+      ${!modoSolo ? `<button onclick="cambiarQty(this, -1)" class="px-2 bg-red-600 text-white rounded-full">➖</button>` : ''}
+      <span class="cantidad">${item.qty}</span>
+      ${!modoSolo ? `<button onclick="cambiarQty(this, 1)" class="px-2 bg-green-600 text-white rounded-full">➕</button>` : ''}
+    </td>
+  `;
+
+  habientes.appendChild(row);
+});
+
+
+    }
+
+    async function cargarDesdeBackend() {
+      const res = await fetch(`/leer_tabla/${clienteID}`);
+      const datosGuardados = await res.json();
+
+      if (Object.keys(datosGuardados).length > 0) {
+        cargarEstado(datosGuardados);
+        return;
+      }
+
+      const datosPDF = await fetch(`/obtener_tabla/${clienteID}`).then(r => r.json());
+      if (!datosPDF.datos || datosPDF.datos.length === 0) {
+        document.getElementById('tabla-productos').innerHTML = `<tr><td colspan="6" class="text-center py-4">⚠️ No se encontraron datos en el PDF.</td></tr>`;
+        return;
+      }
+
+      function normalizarTexto(texto) {
+        return texto?.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '';
+      }
+
+      const grupos = {};
+      datosPDF.datos.forEach(item => {
+        const modelo = normalizarTexto(item.modelo);
+        const color = normalizarTexto(item.color);
+        if (!modelo || !color) return;
+        const clave = `${modelo}||${color}`;
+        grupos[clave] = (grupos[clave] || 0) + 1;
+      });
+
+      const activos = [];
+      for (const clave in grupos) {
+        const [modelo, color] = clave.split('||');
+        activos.push({ modelo, color, qty: grupos[clave] });
+      }
+
+      cargarEstado({ activos, seleccionados: [] });
+      guardarEstado(activos, []);
+    }
+
+    function moverSeleccionados() {
+      const filas = document.querySelectorAll('#tabla-productos tr');
+      const destino = document.getElementById('tabla-habientes');
+      let index = destino.children.length + 1;
+
+      filas.forEach(fila => {
+        const checkbox = fila.querySelector('.fila-checkbox');
+        const columnas = fila.querySelectorAll('td');
+        if (checkbox && checkbox.checked) {
+          const modelo = columnas[2].textContent;
+          const color = columnas[3].textContent;
+          const qty = parseInt(columnas[4].textContent);
+
+          const nueva = document.createElement('tr');
+          nueva.className = 'border-b border-gray-300';
+          nueva.innerHTML = `
+            <td>${index++}</td>
+            <td>${modelo}</td>
+            <td>${color}</td>
+            <td class="flex items-center gap-2">
+              <button onclick="cambiarQty(this, -1)" class="px-2 bg-red-600 text-white rounded-full">➖</button>
+              <span class="cantidad">${qty}</span>
+              <button onclick="cambiarQty(this, 1)" class="px-2 bg-green-600 text-white rounded-full">➕</button>
+            </td>
+          `;
+          destino.appendChild(nueva);
+          fila.remove();
+        }
+      });
+
+      actualizarHabientes();
+    }
+
+    function cambiarQty(btn, delta) {
+      const span = btn.parentElement.querySelector('.cantidad');
+      let nuevaQty = parseInt(span.textContent) + delta;
+      if (nuevaQty <= 0) {
+        btn.closest('tr').remove();
+      } else {
+        span.textContent = nuevaQty;
+      }
+      actualizarHabientes();
+    }
+
+    function actualizarHabientes() {
+      const activos = [];
+      const seleccionados = [];
+
+      document.querySelectorAll('#tabla-productos tr').forEach(row => {
+        const cols = row.querySelectorAll('td');
+        activos.push({ modelo: cols[2].textContent, color: cols[3].textContent, qty: cols[4].textContent });
+      });
+
+      document.querySelectorAll('#tabla-habientes tr').forEach(row => {
+        const cols = row.querySelectorAll('td');
+        const qty = row.querySelector('.cantidad')?.textContent || '1';
+        seleccionados.push({ modelo: cols[1].textContent, color: cols[2].textContent, qty });
+      });
+
+      guardarEstado(activos, seleccionados);
+    }
+
+    function eliminarFila(btn) {
+      if (confirm("¿Seguro que quieres eliminar esta fila?")) {
+        btn.closest('tr').remove();
+        actualizarHabientes();
+      }
+    }
+
+    cargarDesdeBackend();
+  </script>
+</body>
+</html>

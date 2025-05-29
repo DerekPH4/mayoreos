@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Mayoreos - ProHats</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-black text-white min-h-screen flex flex-col relative overflow-x-hidden">
+
+  <div class="flex justify-between items-center px-6 py-4">
+    <h1 class="text-4xl font-bold text-center w-full tracking-wide">MAYOREOS</h1>
+    <img src="/static/logo.png" alt="ProHats Logo" class="w-20 h-auto absolute top-4 right-4">
+  </div>
+
+
+  <div class="flex justify-center mb-4 px-6">
+    <input id="buscador" type="text" placeholder="Buscar mayoreo o ID..." class="w-full max-w-md px-4 py-2 rounded-full text-black focus:outline-none shadow-lg">
+  </div>
+
+  <div id="tarjetas" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 px-6 pb-24"></div>
+
+  <div id="fondo-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-40" onclick="ocultarModal()"></div>
+
+  <div id="modal" class="hidden fixed bottom-24 right-6 bg-black border border-red-700 rounded-3xl p-6 w-80 z-50 shadow-xl">
+    <h2 class="text-2xl font-bold text-center mb-4">AGREGAR MAYOREOS</h2>
+    <form id="formulario" class="space-y-4" onsubmit="agregarTarjeta(event)">
+      <div>
+        <label for="mayoreo" class="text-red-500 block mb-1">MAYOREO</label>
+        <input id="mayoreo" type="text" required class="w-full rounded-full px-4 py-2 text-black focus:outline-none">
+      </div>
+      <div>
+        <label for="id" class="text-red-500 block mb-1">ID</label>
+        <input id="id" type="text" required class="w-full rounded-full px-4 py-2 text-black focus:outline-none">
+      </div>
+      <button type="submit" class="bg-red-700 hover:bg-red-800 w-full py-2 rounded-full font-bold">AGREGAR</button>
+      <button type="button" onclick="ocultarModal()" class="text-sm mt-2 underline text-center w-full">Cancelar</button>
+    </form>
+  </div>
+
+  <!-- Botón eliminar -->
+  <button id="btn-eliminar" onclick="activarModoEliminar()" class="fixed bottom-24 right-6 bg-red-700 text-white rounded-full w-16 h-16 text-2xl shadow-lg hover:bg-red-800 z-50">🗑️</button>
+  <button id="btn-confirmar" onclick="confirmarEliminacionSeleccionada()" class="hidden fixed bottom-40 right-6 bg-green-600 text-white rounded-full w-16 h-16 text-2xl shadow-lg hover:bg-green-700 z-50">✅</button>
+
+  <!-- Botón flotante -->
+  <button onclick="mostrarModal()" class="fixed bottom-6 right-6 bg-red-700 text-white rounded-full w-16 h-16 text-3xl shadow-lg hover:bg-red-800 z-50">+</button>
+
+  <script>
+    let modoEliminarActivo = false;
+
+    function mostrarModal() {
+      document.getElementById('modal').classList.remove('hidden');
+      document.getElementById('fondo-modal').classList.remove('hidden');
+    }
+
+    function ocultarModal() {
+      document.getElementById('modal').classList.add('hidden');
+      document.getElementById('fondo-modal').classList.add('hidden');
+      document.getElementById('formulario').reset();
+    }
+
+    async function agregarTarjeta(event) {
+  event.preventDefault();
+  const mayoreo = document.getElementById('mayoreo').value;
+  const id = document.getElementById('id').value;
+  const nuevoCliente = { id, mayoreo };
+
+  const res = await fetch('/clientes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(nuevoCliente)
+  });
+
+  if (res.ok) {
+    ocultarModal();
+    document.getElementById('tarjetas').innerHTML = '';  // Limpia lo anterior
+    cargarClientesGuardados();  // Vuelve a cargar desde el backend
+  } else {
+    const error = await res.json();
+    alert(`❌ ${error.error}`);
+  }
+}
+
+
+    async function cargarClientesGuardados() {
+      const res = await fetch('/clientes');
+      const datos = await res.json();
+      datos.forEach(renderCliente);
+    }
+
+    function activarModoEliminar() {
+      modoEliminarActivo = !modoEliminarActivo;
+      document.getElementById('btn-confirmar').classList.toggle('hidden', !modoEliminarActivo);
+      document.querySelectorAll('.tarjeta').forEach(tarjeta => {
+        if (modoEliminarActivo) {
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.className = 'selector-eliminar absolute top-2 right-2 w-5 h-5';
+          tarjeta.appendChild(checkbox);
+        } else {
+          tarjeta.querySelectorAll('.selector-eliminar').forEach(c => c.remove());
+        }
+      });
+    }
+
+    function confirmarEliminacionSeleccionada() {
+      const seleccionadas = document.querySelectorAll('.selector-eliminar:checked');
+      if (seleccionadas.length === 0) return alert('⚠️ No has seleccionado ninguna carpeta.');
+
+      const confirmar = confirm(`¿Seguro que quieres eliminar ${seleccionadas.length} carpeta(s)?`);
+      if (!confirmar) return;
+
+      fetch('/clientes')
+        .then(res => res.json())
+        .then(clientes => {
+          const nuevosClientes = [...clientes];
+
+          seleccionadas.forEach(checkbox => {
+            const tarjeta = checkbox.closest('.tarjeta');
+            const id = tarjeta.querySelector('.absolute').textContent.trim();
+            tarjeta.remove();
+
+            const idx = nuevosClientes.findIndex(c => c.id === id);
+            if (idx !== -1) nuevosClientes.splice(idx, 1);
+
+            fetch(`/guardar_tabla/${id}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ activos: [], seleccionados: [] })
+            });
+          });
+
+          fetch('/clientes', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(nuevosClientes)
+          });
+
+          activarModoEliminar();
+        });
+    }
+
+    function renderCliente(cliente) {
+      const tarjetasContainer = document.getElementById('tarjetas');
+      const tarjeta = document.createElement('div');
+      tarjeta.className = 'bg-white text-black rounded-2xl shadow-lg p-4 relative tarjeta group';
+      tarjeta.setAttribute('data-text', `${cliente.mayoreo.toLowerCase()} ${cliente.id}`);
+
+      tarjeta.innerHTML = `
+        <input type="file" hidden id="file-${cliente.id}" accept=".pdf" />
+        <div class="absolute -top-4 left-4 bg-red-700 text-white font-bold px-4 py-1 rounded-full text-lg">${cliente.id}</div>
+        <div class="mt-6 font-bold text-lg text-center">${cliente.mayoreo}</div>
+        <div class="flex justify-center mt-4 space-x-4">
+          <button title="Editar" class="editar-btn"><span class="text-red-700 text-xl">📤</span></button>
+          <button title="Ver" class="ver-btn"><span class="text-red-700 text-xl">✏️</span></button>
+          <button title="Solo ver" class="ver-solo-btn"><span class="text-red-700 text-xl">👁️</span></button>
+        </div>
+      `;
+
+      const inputFile = tarjeta.querySelector('input[type="file"]');
+      const editarBtn = tarjeta.querySelector('.editar-btn');
+      const verBtn = tarjeta.querySelector('.ver-btn');
+      const verSoloBtn = tarjeta.querySelector('.ver-solo-btn');
+
+      editarBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        inputFile.click();
+      });
+
+      verBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.location.href = `cliente.html?id=${cliente.id}`;
+      });
+
+      verSoloBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.location.href = `cliente.html?id=${cliente.id}&modo=solo`;
+      });
+
+      inputFile.addEventListener('change', () => {
+        const archivo = inputFile.files[0];
+        if (archivo) {
+          const formData = new FormData();
+          formData.append('archivo', archivo);
+
+          fetch(`/subir_pdf/${cliente.id}`, {
+            method: 'POST',
+            body: formData
+          })
+          .then(res => res.json())
+          .then(() => {
+            alert(`Archivo subido y procesado para ${cliente.mayoreo}`);
+          })
+          .catch(() => alert('❌ Error al subir o procesar el archivo'));
+        }
+      });
+
+      tarjetasContainer.appendChild(tarjeta);
+    }
+
+    document.getElementById('buscador').addEventListener('input', function () {
+      const filtro = this.value.toLowerCase();
+      document.querySelectorAll('.tarjeta').forEach(t => {
+        const texto = t.getAttribute('data-text');
+        t.style.display = texto.includes(filtro) ? 'block' : 'none';
+      });
+    });
+
+    cargarClientesGuardados();
+  </script>
+</body>
+</html>
