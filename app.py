@@ -117,12 +117,13 @@ def extraer_tabla_pdf(ruta_pdf):
                     if not fila or len(fila) < 5:
                         continue
                     resultados.append({
-                        "modelo": fila[2].strip(),
-                        "color": fila[3].strip(),
-                        "talla": fila[4].strip(),
-                        "precio": fila[-2].strip()
+                        "modelo": fila[2].strip() if len(fila) > 2 and fila[2] else "",
+                        "color": fila[3].strip() if len(fila) > 3 and fila[3] else "",
+                        "talla": fila[4].strip() if len(fila) > 4 and fila[4] else "",
+                        "precio": fila[-2].strip() if len(fila) >= 2 and fila[-2] else ""
                     })
     return resultados
+
 
 # Para Render
 if __name__ == '__main__':
