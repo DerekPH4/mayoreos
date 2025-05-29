@@ -127,10 +127,11 @@ fetch('/clientes')
       const res = await fetch(`/leer_tabla/${clienteID}`);
       const datosGuardados = await res.json();
 
-      if (Object.keys(datosGuardados).length > 0) {
-        cargarEstado(datosGuardados);
-        return;
-      }
+      if (datosGuardados.activos?.length > 0 || datosGuardados.seleccionados?.length > 0) {
+  cargarEstado(datosGuardados);
+  return;
+}
+
 
       const datosPDF = await fetch(`/obtener_tabla/${clienteID}`).then(r => r.json());
       if (!datosPDF.datos || datosPDF.datos.length === 0) {
