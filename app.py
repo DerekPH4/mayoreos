@@ -123,4 +123,5 @@ def extraer_tabla_pdf(ruta_pdf):
     return resultados
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 5000))  # Render requiere que uses el puerto de env
+    app.run(host='0.0.0.0', port=port)
